@@ -78,8 +78,9 @@ class CasFactory extends AbstractFactory
         $this->addOption('cas_path', '/cas/');
         $this->addOption('ca_cert_path', '');
         $this->addOption('cas_protocol', 'S1');
-        $this->addOption('cas_mapping_attribute', '###CAS_USER_NAME###');
+        $this->addOption('cas_mapping_attribute', array());
         $this->addOption('cas_logout', '');
+        $this->addOption('cas_role_mapping', array());
     }
 
     /**
@@ -97,9 +98,15 @@ class CasFactory extends AbstractFactory
                 ->scalarNode('cas_path')->end()
                 ->scalarNode('ca_cert_path')->end()
                 ->scalarNode('cas_protocol')->defaultValue('S1')->end() /* S1 for SAML_VERSION_1, 1.0 for CAS 1, 2.0 for CAS 2.0, See CAS.php for more information */
-                ->scalarNode('cas_mapping_attribute')->defaultValue("###CAS_USER_NAME###")->end() /* default value reprensent the username returned by cas (not an attribute) */
+                ->arrayNode('cas_mapping_attribute')
+                    ->children()
+                        ->scalarNode('username')->end()
+                        ->scalarNode('roles')->end()
+                    ->end() /* default value reprensent the username returned by cas (not an attribute) */
+                ->end()
                 ->scalarNode('check_path')->end()
                 ->scalarNode('cas_logout')->end()
+                ->variableNode('cas_role_mapping')->end()
 		    ->end()
         ;
     }
@@ -111,9 +118,9 @@ class CasFactory extends AbstractFactory
 
     protected function createAuthProvider(ContainerBuilder $container, $id, $config, $userProviderId)
     {  
-        $provider = 'security.authentication.provider.pre_authenticated.'.$id;
+        $provider = 'security.authentication.provider.cas.'.$id;
         $container
-            ->setDefinition($provider, new DefinitionDecorator('security.authentication.provider.pre_authenticated'))
+            ->setDefinition($provider, new DefinitionDecorator('security.authentication.provider.cas'))
             ->replaceArgument(0, new Reference($userProviderId))
             ->addArgument($id)
         ;

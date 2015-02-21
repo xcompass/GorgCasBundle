@@ -20,19 +20,17 @@
  ***************************************************************************/
 namespace Gorg\Bundle\CasBundle\Security\Firewall;
 
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Log\LoggerInterface;
+use Symfony\Component\Security\Core\Authentication\AuthenticationManagerInterface;
+use Symfony\Component\Security\Core\SecurityContextInterface;
 use Symfony\Component\Security\Http\Authentication\AuthenticationFailureHandlerInterface;
 use Symfony\Component\Security\Http\Authentication\AuthenticationSuccessHandlerInterface;
-use Symfony\Component\Security\Http\Session\SessionAuthenticationStrategyInterface;
-use Symfony\Component\Security\Http\HttpUtils;
-use Symfony\Component\Security\Core\Authentication\AuthenticationManagerInterface;
-use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
-use Symfony\Component\Security\Core\Exception\InvalidCsrfTokenException;
-use Symfony\Component\Security\Core\SecurityContextInterface;
-use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Security\Http\Firewall\AbstractAuthenticationListener;
-use Symfony\Component\Security\Core\Authentication\Token\PreAuthenticatedToken;
+use Symfony\Component\Security\Http\HttpUtils;
+use Symfony\Component\Security\Http\Session\SessionAuthenticationStrategyInterface;
+use Symfony\Component\Security\Core\Role\Role;
 
 /**
  * Class for wait the authentication event and call the CAS Api to throw the authentication process
@@ -60,30 +58,49 @@ class CasListener extends AbstractAuthenticationListener
         /* Call CAS API to do authentication */
         \phpCAS::client($this->options['cas_protocol'], $this->options['cas_server'], $this->options['cas_port'], $this->options['cas_path'], false);
 
-        if($this->options['ca_cert_path'])
-        {
+        if ($this->options['ca_cert_path']) {
             \phpCAS::setCasServerCACert($this->options['ca_cert_path']);
-	} else {
+        } else {
             \phpCAS::setNoCasServerValidation();
-	}
+        }
         \phpCAS::forceAuthentication();
-        if($this->options['cas_mapping_attribute']) {
+
+        $user = null;
+        $attributes = array();
+        $roles = array(new Role('ROLE_USER'));
+        // mapping cas attributes into user attributes
+        if ($this->options['cas_mapping_attribute']) {
+            $mapping = $this->options['cas_mapping_attribute'];
             $attributes = \phpCAS::getAttributes();
 
-            if (!$attributes[$this->options['cas_mapping_attribute']]) {
-                return;
+            // username
+            if (in_array('username', $mapping) && in_array($mapping['username'], $attributes)) {
+                $user = $attributes[$mapping['username']];
             }
-            $user = $attributes[$this->options['cas_mapping_attribute']];
-            $credentials = array('ROLE_USER');
-        } else {
-            $user = $attributes[\phpCAS::getUser()];
-            $credentials = array('ROLE_USER');
+            // roles
+            if (array_key_exists('roles', $mapping) && array_key_exists($mapping['roles'], $attributes)) {
+                $casRoles = explode(',', $attributes[$mapping['roles']]);
+                $casRoles = array_map('trim', $casRoles);
+                if ($this->options['cas_role_mapping']) {
+                   // role mapping is defined in the config
+                   foreach ($casRoles as $r) {
+                       $mappedRole = array_key_exists($r, $this->options['cas_role_mapping']) ?
+                           $this->options['cas_role_mapping'][$r] : $r;
+                       $roles[] = new Role($mappedRole);
+                   }
+                }
+            }
+        }
+
+        if (!$user) {
+            // fall back to login name as username
+            $user = \phpCAS::getUser();
         }
 
         if (null !== $this->logger) {
             $this->logger->info(sprintf('Authentication success: %s', $user));
         }
 
-        return $this->authenticationManager->authenticate(new PreAuthenticatedToken($user, $credentials, $this->providerKey));
+        return $this->authenticationManager->authenticate(new CasUserToken($user, $attributes, $roles));
     }
 }
